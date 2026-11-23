@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SCADA Monitoring System</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --line:#30363d; --txt:#e6edf3; --mute:#8b949e;
+    --kw:#ff7b72; --str:#a5d6ff; --com:#8b949e; --fn:#d2a8ff; --num:#79c0ff; --acc:#2ea043;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  header{padding:20px 16px 8px;max-width:980px;margin:0 auto}
+  h1{margin:0 0 6px;font-size:1.5rem}
+  p.sub{margin:0 0 12px;color:var(--mute);font-size:.95rem;line-height:1.5}
+  .tags{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+  .tag{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:.78rem;color:var(--mute)}
+  .tag b{color:var(--acc)}
+  main{max-width:980px;margin:0 auto;padding:8px 16px 40px}
+  .win{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .bar{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:#1c2128}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .r{background:#ff5f56}.y{background:#ffbd2e}.g{background:#27c93f}
+  .fname{margin-left:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.82rem;color:var(--mute);flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  button{background:#21262d;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:5px 10px;font-size:.8rem;cursor:pointer}
+  button:active{background:#30363d}
+  .code{display:flex;overflow-x:auto;font-family:ui-monospace,Menlo,Consolas,"Courier New",monospace;font-size:.8rem;line-height:1.55}
+  pre{margin:0;padding:12px 0}
+  #gut{padding:12px 10px;color:#484f58;text-align:right;user-select:none;border-right:1px solid var(--line);position:sticky;left:0;background:var(--panel)}
+  #src{padding:12px 14px;white-space:pre;tab-size:4}
+  .k{color:var(--kw)}.s{color:var(--str)}.c{color:var(--com);font-style:italic}.f{color:var(--fn)}.n{color:var(--num)}
+  footer{max-width:980px;margin:0 auto;padding:0 16px 30px;color:var(--mute);font-size:.8rem}
+  code.run{background:#21262d;padding:2px 6px;border-radius:4px}
+</style>
+</head>
+<body>
+<header>
+  <h1>SCADA Monitoring System</h1>
+  <p class="sub">A simple SCADA monitor built with Python and Tkinter. It simulates realistic (random-walk) Temperature, Pressure and Voltage readings, classifies their status, shows live statistics and logs every reading to a file.</p>
+  <div class="tags">
+    <span class="tag"><b>●</b> Python 3</span>
+    <span class="tag">Tkinter GUI</span>
+    <span class="tag">Random-walk readings</span>
+    <span class="tag">Logging: scada_log.txt</span>
+  </div>
+</header>
+
+<main>
+  <div class="win">
+    <div class="bar">
+      <span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="fname">scada_monitor.py</span>
+      <button id="copy">Copy</button>
+      <button id="dl">Download</button>
+    </div>
+    <div class="code">
+      <pre id="gut"></pre>
+      <pre id="src"></pre>
+    </div>
+  </div>
+</main>
+<footer>To run: <code class="run">python scada_monitor.py</code> (requires Python 3 with Tkinter).</footer>
+
+<script type="text/plain" id="raw">"""
+SCADA Monitoring System - SIMPLE VERSION
+Fixes: random-walk readings (realistic), safe log_reading (with open).
+"""
+
+import tkinter as tk
+import random
+import time
+
+LOG_FILE = "scada_log.txt"
+
+SENSOR_RANGES = {
+    "Temperature": {"min": 20, "max": 120, "unit": "°C", "warn": 80, "crit": 100},
+    "Pressure":    {"min": 0,  "max": 15,  "unit": "bar", "warn": 10, "crit": 12},
+    "Voltage":     {"min": 180, "max": 260, "unit": "V",  "warn": 240, "crit": 250},
+}
+
+# Realistic starting values (transformer normal operation)
+last_values = {"Temperature": 55.0, "Pressure": 5.0, "Voltage": 230.0}
+
+# Max change per 2-second tick (thermal inertia -> slow change)
+STEP = {"Temperature": 0.4, "Pressure": 0.15, "Voltage": 1.5}
+
+reading_history = {sensor: [] for sensor in SENSOR_RANGES}
+monitoring = False
+
+
+def generate_reading(sensor):
+    """Random walk: new value = previous value + small change."""
+    r = SENSOR_RANGES[sensor]
+    change = random.uniform(-STEP[sensor], STEP[sensor])
+    new_val = max(r["min"], min(r["max"], last_values[sensor] + change))
+    last_values[sensor] = new_val
+    return round(new_val, 2)
+
+
+def classify_status(sensor, value):
+    r = SENSOR_RANGES[sensor]
+    if value >= r["crit"]:
+        return "CRITICAL", "red"
+    elif value >= r["warn"]:
+        return "WARNING", "orange"
+    else:
+        return "NORMAL", "green"
+
+
+def log_reading(sensor, value, status):
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(f"{time.strftime('%H:%M:%S')} | {sensor} | {value} | {status}\n")
+    except IOError:
+        pass
+
+
+def compute_statistics(sensor):
+    values = [r["value"] for r in reading_history[sensor]]
+    if not values:
+        return None
+    return {"mean": sum(values) / len(values), "min": min(values), "max": max(values)}
+
+
+# ---------------- GUI ----------------
+root = tk.Tk()
+root.title("SCADA Monitoring System")
+root.geometry("420x350")
+
+value_labels = {}
+status_labels = {}
+stats_labels = {}
+
+for sensor in SENSOR_RANGES:
+    frame = tk.LabelFrame(root, text=sensor, padx=10, pady=5)
+    frame.pack(fill="x", padx=10, pady=5)
+    value_labels[sensor] = tk.Label(frame, text="--", font=("Arial", 14))
+    value_labels[sensor].grid(row=0, column=0, sticky="w")
+    status_labels[sensor] = tk.Label(frame, text="NORMAL", font=("Arial", 12, "bold"), fg="green")
+    status_labels[sensor].grid(row=0, column=1, padx=20)
+    stats_labels[sensor] = tk.Label(frame, text="Mean:-- Min:-- Max:--", font=("Arial", 9))
+    stats_labels[sensor].grid(row=1, column=0, columnspan=2, sticky="w")
+
+
+def update_display():
+    if monitoring:
+        for sensor in SENSOR_RANGES:
+            value = generate_reading(sensor)
+            status, color = classify_status(sensor, value)
+
+            value_labels[sensor].config(text=f"{value} {SENSOR_RANGES[sensor]['unit']}")
+            status_labels[sensor].config(text=status, fg=color)
+
+            reading_history[sensor].append({"value": value})
+            log_reading(sensor, value, status)
+
+            stats = compute_statistics(sensor)
+            if stats:
+                stats_labels[sensor].config(
+                    text=f"Mean:{stats['mean']:.1f} Min:{stats['min']:.1f} Max:{stats['max']:.1f}"
+                )
+
+    root.after(2000, update_display)
+
+
+def start_monitoring():
+    global monitoring
+    monitoring = True
+
+
+def stop_monitoring():
+    global monitoring
+    monitoring = False
+
+
+btn_frame = tk.Frame(root)
+btn_frame.pack(pady=15)
+tk.Button(btn_frame, text="Start", bg="green", fg="white", width=10, command=start_monitoring).grid(row=0, column=0, padx=5)
+tk.Button(btn_frame, text="Stop", bg="red", fg="white", width=10, command=stop_monitoring).grid(row=0, column=1, padx=5)
+
+update_display()
+root.mainloop()
+</script>
+
+<script>
+(function(){
+  var code = document.getElementById('raw').textContent.replace(/^\n/, '').replace(/\s+$/, '') + '\n';
+
+  function esc(t){return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+  var re = /("""[\s\S]*?""")|(#[^\n]*)|(f?"(?:\\.|[^"\\\n])*"|f?'(?:\\.|[^'\\\n])*')|\b(def|if|elif|else|return|import|try|except|for|in|global|with|as|not|and|or|True|False|None)\b|\b(\d+\.?\d*)\b|\b([A-Za-z_]\w*)(?=\()/g;
+
+  var out = '', last = 0, m;
+  while ((m = re.exec(code)) !== null) {
+    out += esc(code.slice(last, m.index));
+    var cls = m[1] ? 's' : m[2] ? 'c' : m[3] ? 's' : m[4] ? 'k' : m[5] ? 'n' : 'f';
+    out += '<span class="' + cls + '">' + esc(m[0]) + '</span>';
+    last = re.lastIndex;
+  }
+  out += esc(code.slice(last));
+
+  document.getElementById('src').innerHTML = out;
+
+  var n = code.split('\n').length - 1, g = [];
+  for (var i = 1; i <= n; i++) g.push(i);
+  document.getElementById('gut').textContent = g.join('\n');
+
+  document.getElementById('copy').onclick = function(){
+    var b = this;
+    function done(){ b.textContent = 'Copied!'; setTimeout(function(){ b.textContent = 'Copy'; }, 1500); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(code).then(done);
+    } else {
+      var t = document.createElement('textarea'); t.value = code; document.body.appendChild(t);
+      t.select(); document.execCommand('copy'); document.body.removeChild(t); done();
+    }
+  };
+
+  document.getElementById('dl').onclick = function(){
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([code], {type:'text/plain'}));
+    a.download = 'scada_monitor.py';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  };
+})();
+</script>
+</body>
+</html>
