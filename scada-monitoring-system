@@ -1,0 +1,119 @@
+"""
+SCADA Monitoring System - SIMPLE VERSION
+Fixes: random-walk readings (realistic), safe log_reading (with open).
+"""
+
+import tkinter as tk
+import random
+import time
+
+LOG_FILE = "scada_log.txt"
+
+SENSOR_RANGES = {
+    "Temperature": {"min": 20, "max": 120, "unit": "°C", "warn": 80, "crit": 100},
+    "Pressure":    {"min": 0,  "max": 15,  "unit": "bar", "warn": 10, "crit": 12},
+    "Voltage":     {"min": 180, "max": 260, "unit": "V",  "warn": 240, "crit": 250},
+}
+
+# Realistic starting values (transformer normal operation)
+last_values = {"Temperature": 55.0, "Pressure": 5.0, "Voltage": 230.0}
+
+# Max change per 2-second tick (thermal inertia -> slow change)
+STEP = {"Temperature": 0.4, "Pressure": 0.15, "Voltage": 1.5}
+
+reading_history = {sensor: [] for sensor in SENSOR_RANGES}
+monitoring = False
+
+
+def generate_reading(sensor):
+    """Random walk: new value = previous value + small change."""
+    r = SENSOR_RANGES[sensor]
+    change = random.uniform(-STEP[sensor], STEP[sensor])
+    new_val = max(r["min"], min(r["max"], last_values[sensor] + change))
+    last_values[sensor] = new_val
+    return round(new_val, 2)
+
+
+def classify_status(sensor, value):
+    r = SENSOR_RANGES[sensor]
+    if value >= r["crit"]:
+        return "CRITICAL", "red"
+    elif value >= r["warn"]:
+        return "WARNING", "orange"
+    else:
+        return "NORMAL", "green"
+
+
+def log_reading(sensor, value, status):
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(f"{time.strftime('%H:%M:%S')} | {sensor} | {value} | {status}\n")
+    except IOError:
+        pass
+
+
+def compute_statistics(sensor):
+    values = [r["value"] for r in reading_history[sensor]]
+    if not values:
+        return None
+    return {"mean": sum(values) / len(values), "min": min(values), "max": max(values)}
+
+
+# ---------------- GUI ----------------
+root = tk.Tk()
+root.title("SCADA Monitoring System")
+root.geometry("420x350")
+
+value_labels = {}
+status_labels = {}
+stats_labels = {}
+
+for sensor in SENSOR_RANGES:
+    frame = tk.LabelFrame(root, text=sensor, padx=10, pady=5)
+    frame.pack(fill="x", padx=10, pady=5)
+    value_labels[sensor] = tk.Label(frame, text="--", font=("Arial", 14))
+    value_labels[sensor].grid(row=0, column=0, sticky="w")
+    status_labels[sensor] = tk.Label(frame, text="NORMAL", font=("Arial", 12, "bold"), fg="green")
+    status_labels[sensor].grid(row=0, column=1, padx=20)
+    stats_labels[sensor] = tk.Label(frame, text="Mean:-- Min:-- Max:--", font=("Arial", 9))
+    stats_labels[sensor].grid(row=1, column=0, columnspan=2, sticky="w")
+
+
+def update_display():
+    if monitoring:
+        for sensor in SENSOR_RANGES:
+            value = generate_reading(sensor)
+            status, color = classify_status(sensor, value)
+
+            value_labels[sensor].config(text=f"{value} {SENSOR_RANGES[sensor]['unit']}")
+            status_labels[sensor].config(text=status, fg=color)
+
+            reading_history[sensor].append({"value": value})
+            log_reading(sensor, value, status)
+
+            stats = compute_statistics(sensor)
+            if stats:
+                stats_labels[sensor].config(
+                    text=f"Mean:{stats['mean']:.1f} Min:{stats['min']:.1f} Max:{stats['max']:.1f}"
+                )
+
+    root.after(2000, update_display)
+
+
+def start_monitoring():
+    global monitoring
+    monitoring = True
+
+
+def stop_monitoring():
+    global monitoring
+    monitoring = False
+
+
+btn_frame = tk.Frame(root)
+btn_frame.pack(pady=15)
+tk.Button(btn_frame, text="Start", bg="green", fg="white", width=10, command=start_monitoring).grid(row=0, column=0, padx=5)
+tk.Button(btn_frame, text="Stop", bg="red", fg="white", width=10, command=stop_monitoring).grid(row=0, column=1, padx=5)
+
+update_display()
+root.mainloop()
